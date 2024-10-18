@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Box, Typography, Card, CardContent, Button, CardMedia, Container, Grid, Drawer, Accordion, AccordionSummary, AccordionDetails, Radio, RadioGroup, FormControlLabel, TextField } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TaskAltIcon from '@mui/icons-material/TaskAlt';
@@ -7,8 +7,6 @@ import axios from 'axios';
 
 function EnrolledCourses() {
   const [enrollments, setEnrollments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState(null);
   const [paymentState, setPaymentState] = useState({
@@ -16,6 +14,7 @@ function EnrolledCourses() {
     payNowEnabled: true,
     selectedOption: 'add_to_next',
     amount: 0,
+    amountError: false,
   });
 
   useEffect(() => {
@@ -26,10 +25,8 @@ function EnrolledCourses() {
     try {
       const response = await axios.get('http://127.0.0.1:3000/enrollments');
       setEnrollments(response.data);
-      setLoading(false);
     } catch (error) {
-      setError(error.response?.data?.error || 'Failed to fetch enrollments');
-      setLoading(false);
+      console.error(error);
     }
   };
 
@@ -38,11 +35,16 @@ function EnrolledCourses() {
     setSelectedEnrollment(enrollment);
     setDrawerOpen(true);
     if (firstUnpaidInstallment) {
+      const totalPaid = enrollment.installments.reduce((acc, inst) => acc + (inst.status === 'paid' ? inst.amount_paid : 0), 0);
+      const totalDueAmount = enrollment.course.price - totalPaid;
+
       setPaymentState({
         selectedInstallment: firstUnpaidInstallment,
         payNowEnabled: true,
         selectedOption: 'add_to_next',
         amount: firstUnpaidInstallment.amount_due,
+        amountError: false,
+        totalDueAmount,
       });
     }
   };
@@ -55,17 +57,31 @@ function EnrolledCourses() {
       payNowEnabled: true,
       selectedOption: 'add_to_next',
       amount: 0,
+      amountError: false,
     });
   };
 
   const handleAmountChange = (amount) => {
     const amountValue = parseFloat(amount);
-    setPaymentState((prevState) => ({
-      ...prevState,
-      payNowEnabled: amountValue > 0,
-      selectedOption: amountValue >= prevState.selectedInstallment.amount_due ? prevState.selectedOption : 'add_to_next',
-      amount: amountValue,
-    }));
+    const totalDueAmount = paymentState.totalDueAmount;
+
+    // If amount exceeds total due, show error and disable Pay Now
+    if (amountValue > totalDueAmount) {
+      setPaymentState((prevState) => ({
+        ...prevState,
+        amountError: true,
+        payNowEnabled: false,
+        amount: amountValue,
+      }));
+    } else {
+      setPaymentState((prevState) => ({
+        ...prevState,
+        amountError: false,
+        payNowEnabled: amountValue > 0,
+        selectedOption: amountValue >= prevState.selectedInstallment.amount_due ? prevState.selectedOption : 'add_to_next',
+        amount: amountValue,
+      }));
+    }
   };
 
   const handleOptionChange = (event) => {
@@ -227,6 +243,8 @@ function EnrolledCourses() {
                               value={paymentState.amount}
                               onChange={(e) => handleAmountChange(e.target.value)}
                               sx={{ width: '100%' }}
+                              error={paymentState.amountError}
+                              helperText = {paymentState.amountError ? `Amount exceeds total due of ₹${paymentState.totalDueAmount}` : ''}
                             />
                           </Box>
                           {paymentState.amount < installment.amount_due && (
